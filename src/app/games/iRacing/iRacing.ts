@@ -531,6 +531,11 @@ export class iRacing {
     iracingPath,
   }: IracingTrackMapRequest): IracingTrackMapSvg | null {
     if (this.cachedTrackMapId === trackId) {
+      console.log(
+        "Track map cache hit",
+        trackId,
+        this.cachedTrackMap ? "with data" : "empty"
+      );
       return this.cachedTrackMap;
     }
 
@@ -542,6 +547,12 @@ export class iRacing {
       undefined;
 
     const iracingRoots = getIracingInstallRoots(iracingPath);
+    console.log("Track map lookup", {
+      trackId,
+      trackName: resolvedTrackName,
+      trackConfigName: resolvedTrackConfigName,
+      iracingRoots,
+    });
     for (const root of iracingRoots) {
       const directories = getTrackDirectories({
         trackId,
@@ -549,9 +560,17 @@ export class iRacing {
         trackConfigName: resolvedTrackConfigName ?? undefined,
         iracingRoot: root,
       });
+      console.log("Track map directories", root, directories);
       for (const directory of directories) {
+        console.log("Checking track map directory", directory);
         const layers = readSvgLayersFromDirectory(directory);
         if (layers) {
+          console.log(
+            "Track map SVGs found",
+            Object.keys(layers),
+            "from",
+            directory
+          );
           const trackMap: IracingTrackMapSvg = {
             trackId,
             trackName: resolvedTrackName,
