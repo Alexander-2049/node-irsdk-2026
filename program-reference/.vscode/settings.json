@@ -1,0 +1,16 @@
+{
+  "typescript.preferences.quoteStyle": "single",
+  "javascript.preferences.quoteStyle": "single",
+  "cSpell.words": [
+    "iracing",
+    "irating",
+    "irdashies",
+    "posthog"
+  ],
+  "svg.preview.background": "transparent",
+  "eslint.useFlatConfig": true,
+  "workbench.colorCustomizations": {
+    "minimap.background": "#00000000",
+    "scrollbar.shadow": "#00000000"
+  }
+}
