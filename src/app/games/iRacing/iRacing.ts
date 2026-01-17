@@ -1,4 +1,11 @@
-import type { IracingSessionInfo, IracingTelemetry } from "./iRacingInterfaces";
+import fs from "node:fs";
+import path from "node:path";
+import type {
+  IracingSessionInfo,
+  IracingTelemetry,
+  IracingTrackMapRequest,
+  IracingTrackMapSvg,
+} from "./iRacingInterfaces";
 
 const sdk = require("../../../../build/Release/irsdk_node.node");
 
@@ -403,9 +410,97 @@ function buildTelemetry(
   return telemetry;
 }
 
+function getIracingInstallRoots(customRoot?: string): string[] {
+  const roots = new Set<string>();
+  if (customRoot) {
+    roots.add(customRoot);
+  }
+  const envRoots = [
+    process.env.IRACING_PATH,
+    process.env.IRACING_INSTALL_PATH,
+    process.env.IRACING_INSTALL_DIR,
+    process.env.IRACING_HOME,
+  ];
+  for (const candidate of envRoots) {
+    if (candidate) {
+      roots.add(candidate);
+    }
+  }
+  if (process.platform === "win32") {
+    roots.add("C:\\Program Files (x86)\\iRacing");
+    roots.add("C:\\Program Files\\iRacing");
+  }
+  return Array.from(roots);
+}
+
+function getTrackDirectories({
+  trackId,
+  trackName,
+  trackConfigName,
+  iracingRoot,
+}: {
+  trackId: number;
+  trackName?: string;
+  trackConfigName?: string;
+  iracingRoot: string;
+}): string[] {
+  const directories: string[] = [];
+  if (trackName) {
+    directories.push(path.join(iracingRoot, "tracks", trackName));
+    if (trackConfigName) {
+      directories.push(
+        path.join(iracingRoot, "tracks", trackName, trackConfigName)
+      );
+      directories.push(
+        path.join(iracingRoot, "tracks", `${trackName}_${trackConfigName}`)
+      );
+    }
+  }
+  directories.push(path.join(iracingRoot, "trackmaps", String(trackId)));
+  directories.push(path.join(iracingRoot, "trackmaps", String(trackName ?? "")));
+  directories.push(path.join(iracingRoot, "ui", "trackmaps", String(trackId)));
+  if (trackName) {
+    directories.push(path.join(iracingRoot, "ui", "trackmaps", trackName));
+  }
+  return directories;
+}
+
+function readSvgLayersFromDirectory(
+  directory: string
+): Record<string, string> | null {
+  if (!fs.existsSync(directory) || !fs.statSync(directory).isDirectory()) {
+    return null;
+  }
+
+  const entries = fs.readdirSync(directory, { withFileTypes: true });
+  const svgFiles = entries
+    .filter((entry) => entry.isFile() && entry.name.endsWith(".svg"))
+    .map((entry) => entry.name);
+  if (svgFiles.length > 0) {
+    return svgFiles.reduce<Record<string, string>>((acc, file) => {
+      const key = path.basename(file, ".svg");
+      acc[key] = fs.readFileSync(path.join(directory, file), "utf8");
+      return acc;
+    }, {});
+  }
+
+  const nestedDirs = ["trackmap", "track_map", "trackmaps", "track_map_layers"];
+  for (const nestedDir of nestedDirs) {
+    const nestedPath = path.join(directory, nestedDir);
+    const nestedLayers = readSvgLayersFromDirectory(nestedPath);
+    if (nestedLayers) {
+      return nestedLayers;
+    }
+  }
+
+  return null;
+}
+
 export class iRacing {
   private lastSessionInfoReadAt = 0;
   private cachedSessionInfo: IracingSessionInfoData = null;
+  private cachedTrackMap: IracingTrackMapSvg | null = null;
+  private cachedTrackMapId: number | null = null;
 
   public readIRacingSharedMemory(): IracingSharedMemoryData {
     const buffer: Buffer = sdk.readIRacingSharedMemory();
@@ -427,5 +522,52 @@ export class iRacing {
       sessionInfo,
       telemetry,
     };
+  }
+
+  public getTrackMapSvg({
+    trackId,
+    trackName,
+    trackConfigName,
+    iracingPath,
+  }: IracingTrackMapRequest): IracingTrackMapSvg | null {
+    if (this.cachedTrackMapId === trackId) {
+      return this.cachedTrackMap;
+    }
+
+    const resolvedTrackName =
+      trackName ?? this.cachedSessionInfo?.WeekendInfo?.TrackName;
+    const resolvedTrackConfigName =
+      trackConfigName ??
+      this.cachedSessionInfo?.WeekendInfo?.TrackConfigName ??
+      undefined;
+
+    const iracingRoots = getIracingInstallRoots(iracingPath);
+    for (const root of iracingRoots) {
+      const directories = getTrackDirectories({
+        trackId,
+        trackName: resolvedTrackName,
+        trackConfigName: resolvedTrackConfigName ?? undefined,
+        iracingRoot: root,
+      });
+      for (const directory of directories) {
+        const layers = readSvgLayersFromDirectory(directory);
+        if (layers) {
+          const trackMap: IracingTrackMapSvg = {
+            trackId,
+            trackName: resolvedTrackName,
+            trackConfigName: resolvedTrackConfigName ?? undefined,
+            sourceDirectory: directory,
+            layers,
+          };
+          this.cachedTrackMapId = trackId;
+          this.cachedTrackMap = trackMap;
+          return trackMap;
+        }
+      }
+    }
+
+    this.cachedTrackMapId = trackId;
+    this.cachedTrackMap = null;
+    return null;
   }
 }

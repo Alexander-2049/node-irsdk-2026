@@ -12,6 +12,13 @@ export {
   IracingVarType,
 } from "./app/games/iRacing/iRacing";
 
+export type {
+  IracingSessionInfo,
+  IracingTelemetry,
+  IracingTrackMapRequest,
+  IracingTrackMapSvg,
+} from "./app/games/iRacing/iRacingInterfaces";
+
 if (require.main === module) {
   const sdk = new iRacing();
   const distDir = path.resolve(process.cwd(), "dist");

@@ -9,6 +9,21 @@ export interface IracingSessionInfo extends Record<string, unknown> {
   "..."?: string;
 }
 
+export interface IracingTrackMapRequest {
+  trackId: number;
+  trackName?: string;
+  trackConfigName?: string;
+  iracingPath?: string;
+}
+
+export interface IracingTrackMapSvg {
+  trackId: number;
+  trackName?: string;
+  trackConfigName?: string;
+  sourceDirectory: string;
+  layers: Record<string, string>;
+}
+
 export interface IracingWeekendInfo {
   BuildTarget?: string;
   BuildType?: string;
