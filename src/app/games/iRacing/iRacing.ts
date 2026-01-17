@@ -206,13 +206,16 @@ function parseSessionInfoYaml(raw: string): Record<string, unknown> | null {
     return -1;
   };
 
-  const peekNextMeaningfulLine = (startIndex: number): string | null => {
+  const peekNextMeaningfulLine = (
+    startIndex: number
+  ): { trimmed: string; indent: number } | null => {
     for (let i = startIndex; i < lines.length; i += 1) {
       const candidate = lines[i];
       if (!candidate.trim() || candidate.trim() === "---") {
         continue;
       }
-      return candidate.trim();
+      const indent = candidate.match(/^ */)?.[0].length ?? 0;
+      return { trimmed: candidate.trim(), indent };
     }
     return null;
   };
@@ -259,7 +262,12 @@ function parseSessionInfoYaml(raw: string): Record<string, unknown> | null {
 
     if (value === "") {
       const nextLine = peekNextMeaningfulLine(lineIndex + 1);
-      const nextIsList = nextLine?.startsWith("- ") ?? false;
+      const hasChildren = nextLine ? nextLine.indent > indent : false;
+      if (!hasChildren) {
+        parent[key] = "";
+        continue;
+      }
+      const nextIsList = nextLine?.trimmed.startsWith("- ") ?? false;
       const container: any = nextIsList ? [] : {};
       if (parent && typeof parent === "object") {
         parent[key] = container;
@@ -281,17 +289,18 @@ function parseSessionInfoYaml(raw: string): Record<string, unknown> | null {
 }
 
 function readSessionInfo(buf: Buffer, header: IracingHeader): IracingSessionInfo {
-  if (header.sessionInfoLen <= 0) {
+  if (header.sessionInfoOffset <= 0 || header.sessionInfoOffset >= buf.length) {
     return null;
   }
 
-  const slice = buf.slice(
-    header.sessionInfoOffset,
-    header.sessionInfoOffset + header.sessionInfoLen
-  );
+  const slice = buf.slice(header.sessionInfoOffset);
   const zero = slice.indexOf(0);
+  const fallbackEnd =
+    header.sessionInfoLen > 0
+      ? Math.min(header.sessionInfoLen, slice.length)
+      : slice.length;
   const raw = slice
-    .slice(0, zero >= 0 ? zero : header.sessionInfoLen)
+    .slice(0, zero >= 0 ? zero : fallbackEnd)
     .toString("utf8");
 
   return parseSessionInfoYaml(raw);

@@ -68,6 +68,11 @@ Napi::Value ReadIRacingSharedMemory(const Napi::CallbackInfo& info)
     int32_t bufLen = *reinterpret_cast<int32_t*>(base + 36);
 
     constexpr size_t VAR_HEADER_SIZE = 144;
+    size_t mappingSize = 0;
+    MEMORY_BASIC_INFORMATION memInfo;
+    if (VirtualQuery(ptr, &memInfo, sizeof(memInfo)) != 0) {
+        mappingSize = static_cast<size_t>(memInfo.RegionSize);
+    }
 
     size_t totalSize = 0;
 
@@ -93,6 +98,9 @@ Napi::Value ReadIRacingSharedMemory(const Napi::CallbackInfo& info)
         if (bufEnd > totalSize) {
             totalSize = bufEnd;
         }
+    }
+    if (mappingSize > totalSize) {
+        totalSize = mappingSize;
     }
 
     Napi::Buffer<uint8_t> buffer =
