@@ -29,6 +29,7 @@ export interface IracingVarHeader {
   type: IracingVarType;
   offset: number;
   count: number;
+  countAsTime: boolean;
 }
 
 export interface IracingVarBuffer {
@@ -52,10 +53,18 @@ export interface IracingHeader {
 
 export type IracingValue = number | boolean | string | number[] | boolean[];
 
+export type IracingTelemetry = Record<string, IracingValue>;
+
+export interface IracingSessionInfo {
+  raw: string;
+  parsed: Record<string, unknown> | null;
+}
+
 export interface IracingSnapshot {
   header: IracingHeader;
-  sessionInfo: string;
+  sessionInfo: IracingSessionInfo;
   varHeaders: IracingVarHeader[];
+  telemetry: IracingTelemetry;
   data: Buffer;
   getValue: (name: string) => IracingValue | null;
 }
@@ -126,6 +135,8 @@ function readVarHeader(buf: Buffer, offset: number): IracingVarHeader {
   o += 4;
   const count = buf.readInt32LE(o);
   o += 4;
+  const countAsTime = buf.readUInt8(o) !== 0;
+  o += 4;
 
   const name = readCString(buf, o, MAX_STRING);
   o += MAX_STRING;
@@ -141,6 +152,7 @@ function readVarHeader(buf: Buffer, offset: number): IracingVarHeader {
     type: type as IracingVarType,
     offset: dataOffset,
     count,
+    countAsTime,
   };
 }
 
@@ -156,9 +168,89 @@ function readAllVarHeaders(buf: Buffer, header: IracingHeader): IracingVarHeader
   return vars;
 }
 
-function readSessionInfo(buf: Buffer, header: IracingHeader): string {
-  if (header.sessionInfoLen <= 0) {
+function coerceYamlScalar(value: string): string | number | boolean | null {
+  if (value === "") {
     return "";
+  }
+  if (value === "null") {
+    return null;
+  }
+  if (value === "true") {
+    return true;
+  }
+  if (value === "false") {
+    return false;
+  }
+  if (!Number.isNaN(Number(value)) && value.trim() !== "") {
+    return Number(value);
+  }
+  const trimmed = value.replace(/^['"]|['"]$/g, "");
+  return trimmed;
+}
+
+function parseSessionInfoYaml(raw: string): Record<string, unknown> | null {
+  const root: Record<string, unknown> = {};
+  const stack: Array<{ indent: number; value: any }> = [{ indent: -1, value: root }];
+
+  const lines = raw.split(/\r?\n/);
+  for (let lineIndex = 0; lineIndex < lines.length; lineIndex += 1) {
+    const line = lines[lineIndex];
+    if (!line.trim() || line.trim() === "---") {
+      continue;
+    }
+
+    const indent = line.match(/^ */)?.[0].length ?? 0;
+    const trimmed = line.trim();
+
+    while (stack.length > 1 && indent <= stack[stack.length - 1].indent) {
+      stack.pop();
+    }
+
+    const parent = stack[stack.length - 1].value;
+
+    if (trimmed.startsWith("- ")) {
+      const content = trimmed.slice(2);
+      if (!Array.isArray(parent)) {
+        continue;
+      }
+      if (content.includes(":")) {
+        const [key, rest] = content.split(/:(.*)/s);
+        const obj: Record<string, unknown> = {};
+        obj[key.trim()] = coerceYamlScalar(rest.trim());
+        parent.push(obj);
+        stack.push({ indent, value: obj });
+      } else {
+        parent.push(coerceYamlScalar(content.trim()));
+      }
+      continue;
+    }
+
+    const [rawKey, rawValue] = trimmed.split(/:(.*)/s);
+    const key = rawKey.trim();
+    const value = rawValue === undefined ? "" : rawValue.trim();
+
+    if (value === "") {
+      const nextLine = lines[lineIndex + 1];
+      const nextIsList = nextLine?.trim().startsWith("- ");
+      const container: any = nextIsList ? [] : {};
+      if (parent && typeof parent === "object") {
+        parent[key] = container;
+      }
+      stack.push({ indent, value: container });
+      continue;
+    }
+
+    if (parent && typeof parent === "object") {
+      parent[key] = coerceYamlScalar(value);
+    }
+  }
+
+  return root;
+}
+
+function readSessionInfo(buf: Buffer, header: IracingHeader): IracingSessionInfo {
+  if (header.sessionInfoLen <= 0) {
+    return { raw: "", parsed: null };
   }
 
   const slice = buf.slice(
@@ -166,9 +258,11 @@ function readSessionInfo(buf: Buffer, header: IracingHeader): string {
     header.sessionInfoOffset + header.sessionInfoLen
   );
   const zero = slice.indexOf(0);
-  return slice
+  const raw = slice
     .slice(0, zero >= 0 ? zero : header.sessionInfoLen)
     .toString("utf8");
+
+  return { raw, parsed: parseSessionInfoYaml(raw) };
 }
 
 function readLatestVarBuffer(buf: Buffer, header: IracingHeader): Buffer {
@@ -224,6 +318,20 @@ function readVarValue(data: Buffer, header: IracingVarHeader): IracingValue {
   return values as number[] | boolean[];
 }
 
+function buildTelemetry(
+  data: Buffer,
+  varHeaders: IracingVarHeader[]
+): IracingTelemetry {
+  const telemetry: IracingTelemetry = {};
+  for (const entry of varHeaders) {
+    if (!entry.name) {
+      continue;
+    }
+    telemetry[entry.name] = readVarValue(data, entry);
+  }
+  return telemetry;
+}
+
 export class iRacing {
   public readIRacingSharedMemory(): IracingSnapshot {
     const buffer: Buffer = sdk.readIRacingSharedMemory();
@@ -235,11 +343,13 @@ export class iRacing {
     );
     const data = readLatestVarBuffer(buffer, header);
     const sessionInfo = readSessionInfo(buffer, header);
+    const telemetry = buildTelemetry(data, varHeaders);
 
     return {
       header,
       sessionInfo,
       varHeaders,
+      telemetry,
       data,
       getValue: (name: string) => {
         const entry = varHeadersByName.get(name);

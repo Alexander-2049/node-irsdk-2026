@@ -3,6 +3,8 @@
 #include <string>
 
 constexpr wchar_t IRSDK_MAP_NAME[] = L"Local\\IRSDKMemMapFileName";
+constexpr wchar_t IRSDK_EVENT_NAME[] = L"Local\\IRSDKDataValidEvent";
+constexpr char IRSDK_BROADCAST_NAME[] = "IRSDK_BROADCASTMSG";
 
 static std::string WinErrorToString(DWORD err)
 {
@@ -22,6 +24,8 @@ static std::string WinErrorToString(DWORD err)
 Napi::Value ReadIRacingSharedMemory(const Napi::CallbackInfo& info)
 {
     Napi::Env env = info.Env();
+    (void)IRSDK_EVENT_NAME;
+    (void)IRSDK_BROADCAST_NAME;
 
     HANDLE hMap = OpenFileMappingW(FILE_MAP_READ, FALSE, IRSDK_MAP_NAME);
     if (!hMap)
