@@ -1,10 +1,11 @@
-import { performance } from "node:perf_hooks";
+import fs from "node:fs";
+import path from "node:path";
 import { iRacing } from "./app/games/iRacing/iRacing";
 
 export {
   iRacing,
   IracingHeader,
-  IracingSnapshot,
+  IracingSharedMemoryData,
   IracingValue,
   IracingVarBuffer,
   IracingVarHeader,
@@ -13,11 +14,24 @@ export {
 
 if (require.main === module) {
   const sdk = new iRacing();
-  setInterval(() => {
-    const start = performance.now();
-    const snapshot = sdk.readIRacingSharedMemory();
-    const end = performance.now();
-    console.log(`readIRacingSharedMemory: ${(end - start).toFixed(2)} ms`);
-    console.log(snapshot.sessionInfo.parsed?.DriverInfo);
-  }, 1000);
+  const distDir = path.resolve(process.cwd(), "dist");
+
+  const writeData = () => {
+    const data = sdk.readIRacingSharedMemory();
+    const payload = {
+      header: data.header,
+      sessionInfo: data.sessionInfo,
+      telemetry: data.telemetry,
+    };
+    const filename = `data-${Date.now()}.json`;
+    fs.mkdirSync(distDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(distDir, filename),
+      JSON.stringify(payload, null, 2),
+      "utf8"
+    );
+  };
+
+  writeData();
+  setInterval(writeData, 10000);
 }
