@@ -55,18 +55,12 @@ export type IracingValue = number | boolean | string | number[] | boolean[];
 
 export type IracingTelemetry = Record<string, IracingValue>;
 
-export interface IracingSessionInfo {
-  raw: string;
-  parsed: Record<string, unknown> | null;
-}
+export type IracingSessionInfo = Record<string, unknown> | null;
 
-export interface IracingSnapshot {
+export interface IracingSharedMemoryData {
   header: IracingHeader;
   sessionInfo: IracingSessionInfo;
-  varHeaders: IracingVarHeader[];
   telemetry: IracingTelemetry;
-  data: Buffer;
-  getValue: (name: string) => IracingValue | null;
 }
 
 function readCString(buf: Buffer, offset: number, length: number): string {
@@ -241,7 +235,7 @@ function parseSessionInfoYaml(raw: string): Record<string, unknown> | null {
       stack.length = parentIndex + 1;
       const parent = stack[parentIndex].value;
       if (content.includes(":")) {
-        const [key, rest] = content.split(/:(.*)/s);
+        const [key, rest] = content.split(/:(.*)/);
         const obj: Record<string, unknown> = {};
         obj[key.trim()] = coerceYamlScalar(rest.trim());
         parent.push(obj);
@@ -252,7 +246,7 @@ function parseSessionInfoYaml(raw: string): Record<string, unknown> | null {
       continue;
     }
 
-    const [rawKey, rawValue] = trimmed.split(/:(.*)/s);
+    const [rawKey, rawValue] = trimmed.split(/:(.*)/);
     const key = rawKey.trim();
     const value = rawValue === undefined ? "" : rawValue.trim();
 
@@ -288,7 +282,7 @@ function parseSessionInfoYaml(raw: string): Record<string, unknown> | null {
 
 function readSessionInfo(buf: Buffer, header: IracingHeader): IracingSessionInfo {
   if (header.sessionInfoLen <= 0) {
-    return { raw: "", parsed: null };
+    return null;
   }
 
   const slice = buf.slice(
@@ -300,7 +294,7 @@ function readSessionInfo(buf: Buffer, header: IracingHeader): IracingSessionInfo
     .slice(0, zero >= 0 ? zero : header.sessionInfoLen)
     .toString("utf8");
 
-  return { raw, parsed: parseSessionInfoYaml(raw) };
+  return parseSessionInfoYaml(raw);
 }
 
 function readLatestVarBuffer(buf: Buffer, header: IracingHeader): Buffer {
@@ -393,31 +387,28 @@ function buildTelemetry(
 }
 
 export class iRacing {
-  public readIRacingSharedMemory(): IracingSnapshot {
+  private lastSessionInfoReadAt = 0;
+  private cachedSessionInfo: IracingSessionInfo = null;
+
+  public readIRacingSharedMemory(): IracingSharedMemoryData {
     const buffer: Buffer = sdk.readIRacingSharedMemory();
 
     const header = readHeader(buffer);
     const varHeaders = readAllVarHeaders(buffer, header);
-    const varHeadersByName = new Map(
-      varHeaders.map((headerEntry) => [headerEntry.name, headerEntry])
-    );
     const data = readLatestVarBuffer(buffer, header);
-    const sessionInfo = readSessionInfo(buffer, header);
+    const now = Date.now();
+    let sessionInfo = this.cachedSessionInfo;
+    if (!sessionInfo || now - this.lastSessionInfoReadAt >= 5000) {
+      sessionInfo = readSessionInfo(buffer, header);
+      this.cachedSessionInfo = sessionInfo;
+      this.lastSessionInfoReadAt = now;
+    }
     const telemetry = buildTelemetry(data, varHeaders);
 
     return {
       header,
       sessionInfo,
-      varHeaders,
       telemetry,
-      data,
-      getValue: (name: string) => {
-        const entry = varHeadersByName.get(name);
-        if (!entry) {
-          return null;
-        }
-        return readVarValue(data, entry);
-      },
     };
   }
 }
