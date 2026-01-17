@@ -1,7 +1,253 @@
 const sdk = require("../../../../build/Release/irsdk_node.node");
 
+const VAR_HEADER_SIZE = 144;
+const MAX_STRING = 32;
+const MAX_DESC = 64;
+
+export enum IracingVarType {
+  Char = 0,
+  Bool = 1,
+  Int = 2,
+  BitField = 3,
+  Float = 4,
+  Double = 5,
+}
+
+const VAR_TYPE_BYTES: Record<IracingVarType, number> = {
+  [IracingVarType.Char]: 1,
+  [IracingVarType.Bool]: 1,
+  [IracingVarType.Int]: 4,
+  [IracingVarType.BitField]: 4,
+  [IracingVarType.Float]: 4,
+  [IracingVarType.Double]: 8,
+};
+
+export interface IracingVarHeader {
+  name: string;
+  desc: string;
+  unit: string;
+  type: IracingVarType;
+  offset: number;
+  count: number;
+}
+
+export interface IracingVarBuffer {
+  tickCount: number;
+  bufOffset: number;
+}
+
+export interface IracingHeader {
+  ver: number;
+  status: number;
+  tickRate: number;
+  sessionInfoUpdate: number;
+  sessionInfoLen: number;
+  sessionInfoOffset: number;
+  numVars: number;
+  varHeaderOffset: number;
+  numBuf: number;
+  bufLen: number;
+  varBuf: IracingVarBuffer[];
+}
+
+export type IracingValue = number | boolean | string | number[] | boolean[];
+
+export interface IracingSnapshot {
+  header: IracingHeader;
+  sessionInfo: string;
+  varHeaders: IracingVarHeader[];
+  data: Buffer;
+  getValue: (name: string) => IracingValue | null;
+}
+
+function readCString(buf: Buffer, offset: number, length: number): string {
+  const slice = buf.slice(offset, offset + length);
+  const zero = slice.indexOf(0);
+  return slice.slice(0, zero >= 0 ? zero : length).toString("utf8");
+}
+
+function readHeader(buf: Buffer): IracingHeader {
+  let offset = 0;
+
+  const ver = buf.readInt32LE(offset);
+  offset += 4;
+  const status = buf.readInt32LE(offset);
+  offset += 4;
+  const tickRate = buf.readInt32LE(offset);
+  offset += 4;
+  const sessionInfoUpdate = buf.readInt32LE(offset);
+  offset += 4;
+  const sessionInfoLen = buf.readInt32LE(offset);
+  offset += 4;
+  const sessionInfoOffset = buf.readInt32LE(offset);
+  offset += 4;
+  const numVars = buf.readInt32LE(offset);
+  offset += 4;
+  const varHeaderOffset = buf.readInt32LE(offset);
+  offset += 4;
+  const numBuf = buf.readInt32LE(offset);
+  offset += 4;
+  const bufLen = buf.readInt32LE(offset);
+  offset += 4;
+
+  offset += 8;
+
+  const varBuf: IracingVarBuffer[] = [];
+  for (let i = 0; i < numBuf; i += 1) {
+    const tickCount = buf.readInt32LE(offset);
+    offset += 4;
+    const bufOffset = buf.readInt32LE(offset);
+    offset += 4;
+    offset += 8;
+    varBuf.push({ tickCount, bufOffset });
+  }
+
+  return {
+    ver,
+    status,
+    tickRate,
+    sessionInfoUpdate,
+    sessionInfoLen,
+    sessionInfoOffset,
+    numVars,
+    varHeaderOffset,
+    numBuf,
+    bufLen,
+    varBuf,
+  };
+}
+
+function readVarHeader(buf: Buffer, offset: number): IracingVarHeader {
+  let o = offset;
+
+  const type = buf.readInt32LE(o);
+  o += 4;
+  const dataOffset = buf.readInt32LE(o);
+  o += 4;
+  const count = buf.readInt32LE(o);
+  o += 4;
+
+  const name = readCString(buf, o, MAX_STRING);
+  o += MAX_STRING;
+  const desc = readCString(buf, o, MAX_DESC);
+  o += MAX_DESC;
+  const unit = readCString(buf, o, MAX_STRING);
+  o += MAX_STRING;
+
+  return {
+    name,
+    desc,
+    unit,
+    type: type as IracingVarType,
+    offset: dataOffset,
+    count,
+  };
+}
+
+function readAllVarHeaders(buf: Buffer, header: IracingHeader): IracingVarHeader[] {
+  const vars: IracingVarHeader[] = [];
+  let offset = header.varHeaderOffset;
+
+  for (let i = 0; i < header.numVars; i += 1) {
+    vars.push(readVarHeader(buf, offset));
+    offset += VAR_HEADER_SIZE;
+  }
+
+  return vars;
+}
+
+function readSessionInfo(buf: Buffer, header: IracingHeader): string {
+  if (header.sessionInfoLen <= 0) {
+    return "";
+  }
+
+  const slice = buf.slice(
+    header.sessionInfoOffset,
+    header.sessionInfoOffset + header.sessionInfoLen
+  );
+  const zero = slice.indexOf(0);
+  return slice
+    .slice(0, zero >= 0 ? zero : header.sessionInfoLen)
+    .toString("utf8");
+}
+
+function readLatestVarBuffer(buf: Buffer, header: IracingHeader): Buffer {
+  if (header.varBuf.length === 0 || header.bufLen <= 0) {
+    return Buffer.alloc(0);
+  }
+
+  let latest = header.varBuf[0];
+  for (const candidate of header.varBuf) {
+    if (candidate.tickCount > latest.tickCount) {
+      latest = candidate;
+    }
+  }
+
+  return buf.slice(latest.bufOffset, latest.bufOffset + header.bufLen);
+}
+
+function readVarValue(data: Buffer, header: IracingVarHeader): IracingValue {
+  const bytesPerValue = VAR_TYPE_BYTES[header.type];
+
+  if (header.type === IracingVarType.Char && header.count > 1) {
+    return readCString(data, header.offset, header.count);
+  }
+
+  const readSingle = (index: number): number | boolean | string => {
+    const offset = header.offset + index * bytesPerValue;
+    switch (header.type) {
+      case IracingVarType.Char:
+        return String.fromCharCode(data.readUInt8(offset));
+      case IracingVarType.Bool:
+        return data.readUInt8(offset) !== 0;
+      case IracingVarType.Int:
+      case IracingVarType.BitField:
+        return data.readInt32LE(offset);
+      case IracingVarType.Float:
+        return data.readFloatLE(offset);
+      case IracingVarType.Double:
+        return data.readDoubleLE(offset);
+      default:
+        return data.readInt32LE(offset);
+    }
+  };
+
+  if (header.count === 1) {
+    return readSingle(0);
+  }
+
+  const values: Array<number | boolean | string> = [];
+  for (let i = 0; i < header.count; i += 1) {
+    values.push(readSingle(i));
+  }
+
+  return values as number[] | boolean[];
+}
+
 export class iRacing {
-  public readIRacingSharedMemory(): any {
-    return sdk.readIRacingSharedMemory();
+  public readIRacingSharedMemory(): IracingSnapshot {
+    const buffer: Buffer = sdk.readIRacingSharedMemory();
+
+    const header = readHeader(buffer);
+    const varHeaders = readAllVarHeaders(buffer, header);
+    const varHeadersByName = new Map(
+      varHeaders.map((headerEntry) => [headerEntry.name, headerEntry])
+    );
+    const data = readLatestVarBuffer(buffer, header);
+    const sessionInfo = readSessionInfo(buffer, header);
+
+    return {
+      header,
+      sessionInfo,
+      varHeaders,
+      data,
+      getValue: (name: string) => {
+        const entry = varHeadersByName.get(name);
+        if (!entry) {
+          return null;
+        }
+        return readVarValue(data, entry);
+      },
+    };
   }
 }
