@@ -277,10 +277,29 @@ function readLatestVarBuffer(buf: Buffer, header: IracingHeader): Buffer {
     }
   }
 
-  return buf.slice(latest.bufOffset, latest.bufOffset + header.bufLen);
+  const start = latest.bufOffset;
+  const end = latest.bufOffset + header.bufLen;
+  if (start < 0 || end > buf.length) {
+    return Buffer.alloc(0);
+  }
+  return buf.slice(start, end);
 }
 
-function readVarValue(data: Buffer, header: IracingVarHeader): IracingValue {
+function canReadVarValue(data: Buffer, header: IracingVarHeader): boolean {
+  if (header.offset < 0) {
+    return false;
+  }
+  const bytesPerValue = VAR_TYPE_BYTES[header.type] ?? 0;
+  if (header.type === IracingVarType.Char && header.count > 1) {
+    return header.offset + header.count <= data.length;
+  }
+  return header.offset + bytesPerValue * header.count <= data.length;
+}
+
+function readVarValue(data: Buffer, header: IracingVarHeader): IracingValue | null {
+  if (!canReadVarValue(data, header)) {
+    return null;
+  }
   const bytesPerValue = VAR_TYPE_BYTES[header.type];
 
   if (header.type === IracingVarType.Char && header.count > 1) {
@@ -327,7 +346,10 @@ function buildTelemetry(
     if (!entry.name) {
       continue;
     }
-    telemetry[entry.name] = readVarValue(data, entry);
+    const value = readVarValue(data, entry);
+    if (value !== null) {
+      telemetry[entry.name] = value;
+    }
   }
   return telemetry;
 }
