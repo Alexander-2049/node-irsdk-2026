@@ -1,5 +1,7 @@
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
+import { gunzipSync } from "node:zlib";
 import type {
   IracingSessionInfo,
   IracingTelemetry,
@@ -426,6 +428,11 @@ function getIracingInstallRoots(customRoot?: string): string[] {
       roots.add(candidate);
     }
   }
+  const homeDir = os.homedir();
+  if (homeDir) {
+    roots.add(path.join(homeDir, "Documents", "iRacing"));
+    roots.add(path.join(homeDir, "OneDrive", "Documents", "iRacing"));
+  }
   if (process.platform === "win32") {
     roots.add("C:\\Program Files (x86)\\iRacing");
     roots.add("C:\\Program Files\\iRacing");
@@ -465,6 +472,19 @@ function getTrackDirectories({
   return directories;
 }
 
+function readSvgFile(filePath: string): string | null {
+  if (!fs.existsSync(filePath) || !fs.statSync(filePath).isFile()) {
+    return null;
+  }
+  if (filePath.endsWith(".svg")) {
+    return fs.readFileSync(filePath, "utf8");
+  }
+  if (filePath.endsWith(".svgz")) {
+    return gunzipSync(fs.readFileSync(filePath)).toString("utf8");
+  }
+  return null;
+}
+
 function readSvgLayersFromDirectory(
   directory: string
 ): Record<string, string> | null {
@@ -474,12 +494,19 @@ function readSvgLayersFromDirectory(
 
   const entries = fs.readdirSync(directory, { withFileTypes: true });
   const svgFiles = entries
-    .filter((entry) => entry.isFile() && entry.name.endsWith(".svg"))
+    .filter(
+      (entry) =>
+        entry.isFile() &&
+        (entry.name.endsWith(".svg") || entry.name.endsWith(".svgz"))
+    )
     .map((entry) => entry.name);
   if (svgFiles.length > 0) {
     return svgFiles.reduce<Record<string, string>>((acc, file) => {
-      const key = path.basename(file, ".svg");
-      acc[key] = fs.readFileSync(path.join(directory, file), "utf8");
+      const key = path.basename(file, path.extname(file));
+      const content = readSvgFile(path.join(directory, file));
+      if (content) {
+        acc[key] = content;
+      }
       return acc;
     }, {});
   }
@@ -531,28 +558,17 @@ export class iRacing {
     iracingPath,
   }: IracingTrackMapRequest): IracingTrackMapSvg | null {
     if (this.cachedTrackMapId === trackId) {
-      console.log(
-        "Track map cache hit",
-        trackId,
-        this.cachedTrackMap ? "with data" : "empty"
-      );
       return this.cachedTrackMap;
     }
 
     const resolvedTrackName =
-      trackName ?? this.cachedSessionInfo?.WeekendInfo?.TrackName;
+      trackName?.trim() || this.cachedSessionInfo?.WeekendInfo?.TrackName;
     const resolvedTrackConfigName =
-      trackConfigName ??
-      this.cachedSessionInfo?.WeekendInfo?.TrackConfigName ??
+      trackConfigName?.trim() ||
+      this.cachedSessionInfo?.WeekendInfo?.TrackConfigName?.trim() ||
       undefined;
 
     const iracingRoots = getIracingInstallRoots(iracingPath);
-    console.log("Track map lookup", {
-      trackId,
-      trackName: resolvedTrackName,
-      trackConfigName: resolvedTrackConfigName,
-      iracingRoots,
-    });
     for (const root of iracingRoots) {
       const directories = getTrackDirectories({
         trackId,
@@ -560,17 +576,9 @@ export class iRacing {
         trackConfigName: resolvedTrackConfigName ?? undefined,
         iracingRoot: root,
       });
-      console.log("Track map directories", root, directories);
       for (const directory of directories) {
-        console.log("Checking track map directory", directory);
         const layers = readSvgLayersFromDirectory(directory);
         if (layers) {
-          console.log(
-            "Track map SVGs found",
-            Object.keys(layers),
-            "from",
-            directory
-          );
           const trackMap: IracingTrackMapSvg = {
             trackId,
             trackName: resolvedTrackName,

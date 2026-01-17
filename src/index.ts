@@ -30,13 +30,6 @@ if (require.main === module) {
       sessionInfo: data.sessionInfo,
       telemetry: data.telemetry,
     };
-    if (data.sessionInfo?.WeekendInfo?.TrackID) {
-      console.log("TrackID:", data.sessionInfo?.WeekendInfo?.TrackID);
-      const track = sdk.getTrackMapSvg({
-        trackId: data.sessionInfo?.WeekendInfo?.TrackID,
-      });
-      console.log("Track SVG:", track);
-    }
     const filename = `data-${Date.now()}.json`;
     fs.mkdirSync(distDir, { recursive: true });
     fs.writeFileSync(
