@@ -25,10 +25,7 @@
                     "OS=='win'",
                     {
                         "sources": [
-                            "src/app/games/iRacing/lib/test.cc",
-                            # "src/app/irsdk/native/lib/irsdk_utils.cpp",
-                            # "src/app/irsdk/native/lib/yaml_parser.cpp",
-                            # "src/app/irsdk/native/lib/irsdk_defines.h",
+                            "src/app/games/iRacing/lib/irsdk.cc",
                         ]
                     },
                 ]

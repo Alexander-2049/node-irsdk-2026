@@ -57,7 +57,7 @@ Napi::Value ReadIRacingSharedMemory(const Napi::CallbackInfo& info)
         return env.Null();
     }
 
-    // читаем header, чтобы понять реальный размер
+    // reading header, to understand real size
     uint8_t* base = static_cast<uint8_t*>(ptr);
 
     int32_t sessionInfoLen = *reinterpret_cast<int32_t*>(base + 16);

@@ -434,7 +434,7 @@
     "globalconfig": "C:\\nvm4w\\nodejs\\etc\\npmrc",
     "global_prefix": "C:\\nvm4w\\nodejs",
     "init_module": "C:\\Users\\aalex\\.npm-init.js",
-    "local_prefix": "C:\\Users\\aalex\\Desktop\\Dev\\node-iracing-sdk-2026",
+    "local_prefix": "C:\\Users\\aalex\\Desktop\\Dev\\node-irsdk-2026",
     "node_gyp": "C:\\Users\\aalex\\AppData\\Local\\nvm\\v20.19.5\\node_modules\\npm\\node_modules\\node-gyp\\bin\\node-gyp.js",
     "npm_version": "10.8.2",
     "prefix": "C:\\nvm4w\\nodejs",

@@ -11,7 +11,7 @@
     </ProjectConfiguration>
   </ItemGroup>
   <PropertyGroup Label="Globals">
-    <ProjectGuid>{0069BF7F-7EE9-904E-251F-98A2B8A2078E}</ProjectGuid>
+    <ProjectGuid>{8661B606-2232-9C96-05A1-AD53543C47E3}</ProjectGuid>
     <Keyword>Win32Proj</Keyword>
     <RootNamespace>irsdk_node</RootNamespace>
     <IgnoreWarnCompileDuplicatedFilename>true</IgnoreWarnCompileDuplicatedFilename>

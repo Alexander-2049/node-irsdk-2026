@@ -2,7 +2,7 @@
 <Project>
   <ProjectOutputs>
     <ProjectOutput>
-      <FullPath>C:\Users\aalex\Desktop\Dev\node-iracing-sdk-2026\build\Release\irsdk_node.node</FullPath>
+      <FullPath>C:\Users\aalex\Desktop\Dev\node-irsdk-2026\build\Release\irsdk_node.node</FullPath>
     </ProjectOutput>
   </ProjectOutputs>
   <ContentFiles />
