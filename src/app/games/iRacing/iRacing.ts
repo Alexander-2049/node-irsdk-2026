@@ -1,3 +1,5 @@
+import type { IracingSessionInfo, IracingTelemetry } from "./iRacingInterfaces";
+
 const sdk = require("../../../../build/Release/irsdk_node.node");
 
 const VAR_HEADER_SIZE = 144;
@@ -53,13 +55,11 @@ export interface IracingHeader {
 
 export type IracingValue = number | boolean | string | number[] | boolean[];
 
-export type IracingTelemetry = Record<string, IracingValue>;
-
-export type IracingSessionInfo = Record<string, unknown> | null;
+export type IracingSessionInfoData = IracingSessionInfo | null;
 
 export interface IracingSharedMemoryData {
   header: IracingHeader;
-  sessionInfo: IracingSessionInfo;
+  sessionInfo: IracingSessionInfoData;
   telemetry: IracingTelemetry;
 }
 
@@ -185,8 +185,8 @@ function coerceYamlScalar(value: string): string | number | boolean | null {
 type SessionNodeKind = "object" | "array";
 type SessionNode = { indent: number; kind: SessionNodeKind; value: any };
 
-function parseSessionInfoYaml(raw: string): Record<string, unknown> | null {
-  const root: Record<string, unknown> = {};
+function parseSessionInfoYaml(raw: string): IracingSessionInfo | null {
+  const root: IracingSessionInfo = {};
   const stack: SessionNode[] = [{ indent: -1, kind: "object", value: root }];
 
   const lines = raw.split(/\r?\n/);
@@ -293,7 +293,10 @@ function parseSessionInfoYaml(raw: string): Record<string, unknown> | null {
   return root;
 }
 
-function readSessionInfo(buf: Buffer, header: IracingHeader): IracingSessionInfo {
+function readSessionInfo(
+  buf: Buffer,
+  header: IracingHeader
+): IracingSessionInfoData {
   if (header.sessionInfoOffset <= 0 || header.sessionInfoOffset >= buf.length) {
     return null;
   }
@@ -402,7 +405,7 @@ function buildTelemetry(
 
 export class iRacing {
   private lastSessionInfoReadAt = 0;
-  private cachedSessionInfo: IracingSessionInfo = null;
+  private cachedSessionInfo: IracingSessionInfoData = null;
 
   public readIRacingSharedMemory(): IracingSharedMemoryData {
     const buffer: Buffer = sdk.readIRacingSharedMemory();
