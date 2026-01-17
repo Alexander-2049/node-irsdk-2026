@@ -262,12 +262,17 @@ function parseSessionInfoYaml(raw: string): Record<string, unknown> | null {
 
     if (value === "") {
       const nextLine = peekNextMeaningfulLine(lineIndex + 1);
-      const hasChildren = nextLine ? nextLine.indent > indent : false;
+      if (!nextLine) {
+        parent[key] = "";
+        continue;
+      }
+      const nextIsList = nextLine.trimmed.startsWith("- ");
+      const hasChildren =
+        nextLine.indent > indent || (nextIsList && nextLine.indent >= indent);
       if (!hasChildren) {
         parent[key] = "";
         continue;
       }
-      const nextIsList = nextLine?.trimmed.startsWith("- ") ?? false;
       const container: any = nextIsList ? [] : {};
       if (parent && typeof parent === "object") {
         parent[key] = container;
