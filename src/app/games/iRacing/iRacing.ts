@@ -188,11 +188,41 @@ function coerceYamlScalar(value: string): string | number | boolean | null {
   return trimmed;
 }
 
+type SessionNodeKind = "object" | "array";
+type SessionNode = { indent: number; kind: SessionNodeKind; value: any };
+
 function parseSessionInfoYaml(raw: string): Record<string, unknown> | null {
   const root: Record<string, unknown> = {};
-  const stack: Array<{ indent: number; value: any }> = [{ indent: -1, value: root }];
+  const stack: SessionNode[] = [{ indent: -1, kind: "object", value: root }];
 
   const lines = raw.split(/\r?\n/);
+
+  const findParentIndex = (
+    kind: SessionNodeKind,
+    indent: number,
+    allowEqual: boolean
+  ): number => {
+    for (let i = stack.length - 1; i >= 0; i -= 1) {
+      if (stack[i].kind === kind) {
+        if (allowEqual ? stack[i].indent <= indent : stack[i].indent < indent) {
+          return i;
+        }
+      }
+    }
+    return -1;
+  };
+
+  const peekNextMeaningfulLine = (startIndex: number): string | null => {
+    for (let i = startIndex; i < lines.length; i += 1) {
+      const candidate = lines[i];
+      if (!candidate.trim() || candidate.trim() === "---") {
+        continue;
+      }
+      return candidate.trim();
+    }
+    return null;
+  };
+
   for (let lineIndex = 0; lineIndex < lines.length; lineIndex += 1) {
     const line = lines[lineIndex];
     if (!line.trim() || line.trim() === "---") {
@@ -202,23 +232,20 @@ function parseSessionInfoYaml(raw: string): Record<string, unknown> | null {
     const indent = line.match(/^ */)?.[0].length ?? 0;
     const trimmed = line.trim();
 
-    while (stack.length > 1 && indent <= stack[stack.length - 1].indent) {
-      stack.pop();
-    }
-
-    const parent = stack[stack.length - 1].value;
-
     if (trimmed.startsWith("- ")) {
       const content = trimmed.slice(2);
-      if (!Array.isArray(parent)) {
+      const parentIndex = findParentIndex("array", indent, true);
+      if (parentIndex < 0) {
         continue;
       }
+      stack.length = parentIndex + 1;
+      const parent = stack[parentIndex].value;
       if (content.includes(":")) {
         const [key, rest] = content.split(/:(.*)/s);
         const obj: Record<string, unknown> = {};
         obj[key.trim()] = coerceYamlScalar(rest.trim());
         parent.push(obj);
-        stack.push({ indent, value: obj });
+        stack.push({ indent, kind: "object", value: obj });
       } else {
         parent.push(coerceYamlScalar(content.trim()));
       }
@@ -229,14 +256,25 @@ function parseSessionInfoYaml(raw: string): Record<string, unknown> | null {
     const key = rawKey.trim();
     const value = rawValue === undefined ? "" : rawValue.trim();
 
+    const parentIndex = findParentIndex("object", indent, false);
+    if (parentIndex < 0) {
+      continue;
+    }
+    stack.length = parentIndex + 1;
+    const parent = stack[parentIndex].value;
+
     if (value === "") {
-      const nextLine = lines[lineIndex + 1];
-      const nextIsList = nextLine?.trim().startsWith("- ");
+      const nextLine = peekNextMeaningfulLine(lineIndex + 1);
+      const nextIsList = nextLine?.startsWith("- ") ?? false;
       const container: any = nextIsList ? [] : {};
       if (parent && typeof parent === "object") {
         parent[key] = container;
       }
-      stack.push({ indent, value: container });
+      stack.push({
+        indent,
+        kind: nextIsList ? "array" : "object",
+        value: container,
+      });
       continue;
     }
 

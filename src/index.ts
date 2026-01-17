@@ -1,3 +1,4 @@
+import { performance } from "node:perf_hooks";
 import { iRacing } from "./app/games/iRacing/iRacing";
 
 export {
@@ -12,6 +13,9 @@ export {
 
 if (require.main === module) {
   const sdk = new iRacing();
+  const start = performance.now();
   const snapshot = sdk.readIRacingSharedMemory();
+  const end = performance.now();
+  console.log(`readIRacingSharedMemory: ${(end - start).toFixed(2)} ms`);
   console.log(snapshot);
 }

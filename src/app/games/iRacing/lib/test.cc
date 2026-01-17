@@ -60,17 +60,40 @@ Napi::Value ReadIRacingSharedMemory(const Napi::CallbackInfo& info)
     // читаем header, чтобы понять реальный размер
     uint8_t* base = static_cast<uint8_t*>(ptr);
 
-    int32_t numVars      = *reinterpret_cast<int32_t*>(base + 24);
+    int32_t sessionInfoLen = *reinterpret_cast<int32_t*>(base + 16);
+    int32_t sessionInfoOffset = *reinterpret_cast<int32_t*>(base + 20);
+    int32_t numVars = *reinterpret_cast<int32_t*>(base + 24);
     int32_t varHdrOffset = *reinterpret_cast<int32_t*>(base + 28);
-    int32_t numBuf       = *reinterpret_cast<int32_t*>(base + 32);
-    int32_t bufLen       = *reinterpret_cast<int32_t*>(base + 36);
+    int32_t numBuf = *reinterpret_cast<int32_t*>(base + 32);
+    int32_t bufLen = *reinterpret_cast<int32_t*>(base + 36);
 
     constexpr size_t VAR_HEADER_SIZE = 144;
 
-    size_t totalSize =
-        varHdrOffset +
-        numVars * VAR_HEADER_SIZE +
-        numBuf * bufLen;
+    size_t totalSize = 0;
+
+    if (sessionInfoLen > 0 && sessionInfoOffset > 0) {
+        size_t sessionEnd = static_cast<size_t>(sessionInfoOffset) + static_cast<size_t>(sessionInfoLen);
+        totalSize = sessionEnd;
+    }
+
+    if (varHdrOffset > 0 && numVars > 0) {
+        size_t varHeaderEnd =
+            static_cast<size_t>(varHdrOffset) +
+            static_cast<size_t>(numVars) * VAR_HEADER_SIZE;
+        if (varHeaderEnd > totalSize) {
+            totalSize = varHeaderEnd;
+        }
+    }
+
+    const size_t varBufOffset = 48;
+    for (int i = 0; i < numBuf; i++) {
+        const size_t bufEntryOffset = varBufOffset + static_cast<size_t>(i) * 16;
+        int32_t bufOffset = *reinterpret_cast<int32_t*>(base + bufEntryOffset + 4);
+        size_t bufEnd = static_cast<size_t>(bufOffset) + static_cast<size_t>(bufLen);
+        if (bufEnd > totalSize) {
+            totalSize = bufEnd;
+        }
+    }
 
     Napi::Buffer<uint8_t> buffer =
         Napi::Buffer<uint8_t>::Copy(env, base, totalSize);
