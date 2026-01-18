@@ -314,9 +314,11 @@ function readSessionInfo(
     header.sessionInfoLen > 0
       ? Math.min(header.sessionInfoLen, slice.length)
       : slice.length;
-  const raw = slice
-    .slice(0, zero >= 0 ? zero : fallbackEnd)
-    .toString("utf8");
+  const rawSlice = slice.slice(0, zero >= 0 ? zero : fallbackEnd);
+  const utf8Raw = rawSlice.toString("utf8");
+  const raw = utf8Raw.includes("\uFFFD")
+    ? rawSlice.toString("latin1")
+    : utf8Raw;
 
   return parseSessionInfoYaml(raw);
 }
