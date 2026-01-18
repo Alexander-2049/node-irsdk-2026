@@ -6,22 +6,26 @@ export interface IracingSessionInfo extends Record<string, unknown> {
   RadioInfo?: IracingRadioInfo;
   DriverInfo?: IracingDriverInfo;
   SplitTimeInfo?: IracingSplitTimeInfo;
-  "..."?: string;
 }
 
-export interface IracingTrackMapRequest {
-  trackId: number;
-  trackName?: string;
-  trackConfigName?: string;
-  iracingPath?: string;
-}
-
-export interface IracingTrackMapSvg {
-  trackId: number;
-  trackName?: string;
-  trackConfigName?: string;
-  sourceDirectory: string;
-  layers: Record<string, string>;
+export interface TrackDrawing {
+  active: {
+    inside: string;
+    outside: string;
+    trackPathPoints?: { x: number; y: number }[];
+    totalLength?: number;
+  };
+  startFinish: {
+    line?: string;
+    arrow?: string;
+    point?: { x?: number; y?: number; length?: number } | null;
+    direction?: "clockwise" | "anticlockwise" | null;
+  };
+  turns?: {
+    x?: number;
+    y?: number;
+    content?: string;
+  }[];
 }
 
 export interface IracingWeekendInfo {
