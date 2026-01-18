@@ -1,3 +1,14 @@
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { gunzipSync } from "node:zlib";
+import type {
+  IracingSessionInfo,
+  IracingTelemetry,
+  IracingTrackMapRequest,
+  IracingTrackMapSvg,
+} from "./iRacingInterfaces";
+
 const sdk = require("../../../../build/Release/irsdk_node.node");
 
 const VAR_HEADER_SIZE = 144;
@@ -53,13 +64,11 @@ export interface IracingHeader {
 
 export type IracingValue = number | boolean | string | number[] | boolean[];
 
-export type IracingTelemetry = Record<string, IracingValue>;
-
-export type IracingSessionInfo = Record<string, unknown> | null;
+export type IracingSessionInfoData = IracingSessionInfo | null;
 
 export interface IracingSharedMemoryData {
   header: IracingHeader;
-  sessionInfo: IracingSessionInfo;
+  sessionInfo: IracingSessionInfoData;
   telemetry: IracingTelemetry;
 }
 
@@ -185,8 +194,8 @@ function coerceYamlScalar(value: string): string | number | boolean | null {
 type SessionNodeKind = "object" | "array";
 type SessionNode = { indent: number; kind: SessionNodeKind; value: any };
 
-function parseSessionInfoYaml(raw: string): Record<string, unknown> | null {
-  const root: Record<string, unknown> = {};
+function parseSessionInfoYaml(raw: string): IracingSessionInfo | null {
+  const root: IracingSessionInfo = {};
   const stack: SessionNode[] = [{ indent: -1, kind: "object", value: root }];
 
   const lines = raw.split(/\r?\n/);
@@ -293,7 +302,10 @@ function parseSessionInfoYaml(raw: string): Record<string, unknown> | null {
   return root;
 }
 
-function readSessionInfo(buf: Buffer, header: IracingHeader): IracingSessionInfo {
+function readSessionInfo(
+  buf: Buffer,
+  header: IracingHeader
+): IracingSessionInfoData {
   if (header.sessionInfoOffset <= 0 || header.sessionInfoOffset >= buf.length) {
     return null;
   }
@@ -400,9 +412,122 @@ function buildTelemetry(
   return telemetry;
 }
 
+function getIracingInstallRoots(customRoot?: string): string[] {
+  const roots = new Set<string>();
+  if (customRoot) {
+    roots.add(customRoot);
+  }
+  const envRoots = [
+    process.env.IRACING_PATH,
+    process.env.IRACING_INSTALL_PATH,
+    process.env.IRACING_INSTALL_DIR,
+    process.env.IRACING_HOME,
+  ];
+  for (const candidate of envRoots) {
+    if (candidate) {
+      roots.add(candidate);
+    }
+  }
+  const homeDir = os.homedir();
+  if (homeDir) {
+    roots.add(path.join(homeDir, "Documents", "iRacing"));
+    roots.add(path.join(homeDir, "OneDrive", "Documents", "iRacing"));
+  }
+  if (process.platform === "win32") {
+    roots.add("C:\\Program Files (x86)\\iRacing");
+    roots.add("C:\\Program Files\\iRacing");
+  }
+  return Array.from(roots);
+}
+
+function getTrackDirectories({
+  trackId,
+  trackName,
+  trackConfigName,
+  iracingRoot,
+}: {
+  trackId: number;
+  trackName?: string;
+  trackConfigName?: string;
+  iracingRoot: string;
+}): string[] {
+  const directories: string[] = [];
+  if (trackName) {
+    directories.push(path.join(iracingRoot, "tracks", trackName));
+    if (trackConfigName) {
+      directories.push(
+        path.join(iracingRoot, "tracks", trackName, trackConfigName)
+      );
+      directories.push(
+        path.join(iracingRoot, "tracks", `${trackName}_${trackConfigName}`)
+      );
+    }
+  }
+  directories.push(path.join(iracingRoot, "trackmaps", String(trackId)));
+  directories.push(path.join(iracingRoot, "trackmaps", String(trackName ?? "")));
+  directories.push(path.join(iracingRoot, "ui", "trackmaps", String(trackId)));
+  if (trackName) {
+    directories.push(path.join(iracingRoot, "ui", "trackmaps", trackName));
+  }
+  return directories;
+}
+
+function readSvgFile(filePath: string): string | null {
+  if (!fs.existsSync(filePath) || !fs.statSync(filePath).isFile()) {
+    return null;
+  }
+  if (filePath.endsWith(".svg")) {
+    return fs.readFileSync(filePath, "utf8");
+  }
+  if (filePath.endsWith(".svgz")) {
+    return gunzipSync(fs.readFileSync(filePath)).toString("utf8");
+  }
+  return null;
+}
+
+function readSvgLayersFromDirectory(
+  directory: string
+): Record<string, string> | null {
+  if (!fs.existsSync(directory) || !fs.statSync(directory).isDirectory()) {
+    return null;
+  }
+
+  const entries = fs.readdirSync(directory, { withFileTypes: true });
+  const svgFiles = entries
+    .filter(
+      (entry) =>
+        entry.isFile() &&
+        (entry.name.endsWith(".svg") || entry.name.endsWith(".svgz"))
+    )
+    .map((entry) => entry.name);
+  if (svgFiles.length > 0) {
+    return svgFiles.reduce<Record<string, string>>((acc, file) => {
+      const key = path.basename(file, path.extname(file));
+      const content = readSvgFile(path.join(directory, file));
+      if (content) {
+        acc[key] = content;
+      }
+      return acc;
+    }, {});
+  }
+
+  const nestedDirs = ["trackmap", "track_map", "trackmaps", "track_map_layers"];
+  for (const nestedDir of nestedDirs) {
+    const nestedPath = path.join(directory, nestedDir);
+    const nestedLayers = readSvgLayersFromDirectory(nestedPath);
+    if (nestedLayers) {
+      return nestedLayers;
+    }
+  }
+
+  return null;
+}
+
 export class iRacing {
   private lastSessionInfoReadAt = 0;
-  private cachedSessionInfo: IracingSessionInfo = null;
+  private cachedSessionInfo: IracingSessionInfoData = null;
+  private cachedTrackMap: IracingTrackMapSvg | null = null;
+  private cachedTrackMapId: number | null = null;
 
   public readIRacingSharedMemory(): IracingSharedMemoryData {
     const buffer: Buffer = sdk.readIRacingSharedMemory();
@@ -424,5 +549,52 @@ export class iRacing {
       sessionInfo,
       telemetry,
     };
+  }
+
+  public getTrackMapSvg({
+    trackId,
+    trackName,
+    trackConfigName,
+    iracingPath,
+  }: IracingTrackMapRequest): IracingTrackMapSvg | null {
+    if (this.cachedTrackMapId === trackId) {
+      return this.cachedTrackMap;
+    }
+
+    const resolvedTrackName =
+      trackName?.trim() || this.cachedSessionInfo?.WeekendInfo?.TrackName;
+    const resolvedTrackConfigName =
+      trackConfigName?.trim() ||
+      this.cachedSessionInfo?.WeekendInfo?.TrackConfigName?.trim() ||
+      undefined;
+
+    const iracingRoots = getIracingInstallRoots(iracingPath);
+    for (const root of iracingRoots) {
+      const directories = getTrackDirectories({
+        trackId,
+        trackName: resolvedTrackName,
+        trackConfigName: resolvedTrackConfigName ?? undefined,
+        iracingRoot: root,
+      });
+      for (const directory of directories) {
+        const layers = readSvgLayersFromDirectory(directory);
+        if (layers) {
+          const trackMap: IracingTrackMapSvg = {
+            trackId,
+            trackName: resolvedTrackName,
+            trackConfigName: resolvedTrackConfigName ?? undefined,
+            sourceDirectory: directory,
+            layers,
+          };
+          this.cachedTrackMapId = trackId;
+          this.cachedTrackMap = trackMap;
+          return trackMap;
+        }
+      }
+    }
+
+    this.cachedTrackMapId = trackId;
+    this.cachedTrackMap = null;
+    return null;
   }
 }

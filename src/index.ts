@@ -12,6 +12,13 @@ export {
   IracingVarType,
 } from "./app/games/iRacing/iRacing";
 
+export type {
+  IracingSessionInfo,
+  IracingTelemetry,
+  IracingTrackMapRequest,
+  IracingTrackMapSvg,
+} from "./app/games/iRacing/iRacingInterfaces";
+
 if (require.main === module) {
   const sdk = new iRacing();
   const distDir = path.resolve(process.cwd(), "dist");
@@ -28,8 +35,15 @@ if (require.main === module) {
     fs.writeFileSync(
       path.join(distDir, filename),
       JSON.stringify(payload, null, 2),
-      "utf8"
+      "utf8",
     );
+
+    const trackId = data.sessionInfo?.WeekendInfo?.TrackID;
+    if (trackId) {
+      console.log({ trackId });
+      const track = sdk.getTrackMapSvg({ trackId });
+      console.log(track);
+    }
   };
 
   writeData();
