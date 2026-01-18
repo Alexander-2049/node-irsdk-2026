@@ -15,8 +15,7 @@ export {
 export type {
   IracingSessionInfo,
   IracingTelemetry,
-  IracingTrackMapRequest,
-  IracingTrackMapSvg,
+  TrackDrawing,
 } from "./app/games/iRacing/iRacingInterfaces";
 
 if (require.main === module) {
@@ -29,6 +28,7 @@ if (require.main === module) {
       header: data.header,
       sessionInfo: data.sessionInfo,
       telemetry: data.telemetry,
+      trackDrawing: data.trackDrawing,
     };
     const filename = `data-${Date.now()}.json`;
     fs.mkdirSync(distDir, { recursive: true });
@@ -38,12 +38,6 @@ if (require.main === module) {
       "utf8",
     );
 
-    const trackId = data.sessionInfo?.WeekendInfo?.TrackID;
-    if (trackId) {
-      console.log({ trackId });
-      const track = sdk.getTrackMapSvg({ trackId });
-      console.log(track);
-    }
   };
 
   writeData();
